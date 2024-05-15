@@ -1,0 +1,11 @@
+redis
+
+[dev]
+redis
+
+[lint]
+pylint
+
+[test]
+flake8
+pytest

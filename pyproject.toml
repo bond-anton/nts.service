@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nts.service"
+dynamic = ["version"]
+description = "Simple service daemon impementation"
+authors = [
+  { name = "Anton Bondarenko", email = "bond.anton@gmail.com" },
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "redis",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/bond-anton/nts.service"
+"Bug Tracker" = "https://github.com/bond-anton/nts.service/issues"
+
+[project.optional-dependencies]
+dev = ["redis"]
+test = ["flake8", "pytest"]
+lint = ["pylint"]
+
+[tool.setuptools.dynamic]
+version = {attr = "nts.service.__version__"}
+
+[tool.mypy]
+python_version = "3.9"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]
