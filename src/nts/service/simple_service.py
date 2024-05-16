@@ -25,7 +25,7 @@ class SimpleService:
         service_name: str = "service",
         version: str = "0.0.1",
         delay: float = 5,
-        **kwargs
+        **kwargs,
     ) -> None:
         self.__service_name: str = service_name
         self.__version: str = version
