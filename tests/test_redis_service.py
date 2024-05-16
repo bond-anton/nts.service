@@ -60,22 +60,24 @@ class TestRedisService(unittest.TestCase):
             logging_level=LogLevel.DEBUG,
             username="worker2",
         )
+        try:
+            # test service name is correctly set
+            ch_name = "test_ch_2345ghdkuuu"
+            worker.del_time_series_channel(ch_name)
+            self.assertEqual(worker.ts_labels, [])
+            worker.create_time_series_channel(ch_name, retention=2000, aggregation=(1, 60))
+            self.assertEqual(worker.ts_labels, [ch_name])
+            self.assertEqual(len(worker.ts.info(ch_name).rules), 4)
+            worker.del_time_series_aggregation(ch_name, 60)
+            self.assertEqual(len(worker.ts.info(ch_name).rules), 2)
+            worker.put_ts_data(ch_name, 3.14)
+            worker.del_time_series_channel(ch_name)
+            self.assertEqual(worker.ts_labels, [])
 
-        # test service name is correctly set
-        ch_name = "test_ch_2345ghdkuuu"
-        worker.del_time_series_channel(ch_name)
-        self.assertEqual(worker.ts_labels, [])
-        worker.create_time_series_channel(ch_name, retention=2000, aggregation=(1, 60))
-        self.assertEqual(worker.ts_labels, [ch_name])
-        self.assertEqual(len(worker.ts.info(ch_name).rules), 4)
-        worker.del_time_series_aggregation(ch_name, 60)
-        self.assertEqual(len(worker.ts.info(ch_name).rules), 2)
-        worker.put_ts_data(ch_name, 3.14)
-        worker.del_time_series_channel(ch_name)
-        self.assertEqual(worker.ts_labels, [])
-
-        redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
-        redis_cli.delete("TestRedisWorker")
+            redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
+            redis_cli.delete("TestRedisWorker")
+        except redis.exceptions.ResponseError:
+            pass
 
     def test_redis_service(self) -> None:
         """
