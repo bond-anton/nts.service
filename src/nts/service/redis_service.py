@@ -4,38 +4,96 @@ Provides service class which use Redis server for data storage and pub/sub commu
 
 from typing import Union
 import sys
+import datetime
+import logging
 import redis
 
 from .simple_service import SimpleService
 from .__helpers import time_ms
 
 
-class RedisService(SimpleService):
-    """Service class with Redis data storage and pub/sub capabilities."""
+class RedisStreamHandler(logging.Handler):
+    """Stream handler to send logs to Redis"""
 
     def __init__(
         self,
-        service_name: str = "Redis Service",
+        worker_name: str,
+        connection_conf: Union[dict, None] = None,
+        stream_name: str = "worker_logs",
+    ) -> None:
+        super().__init__()
+        self.worker_name: str = worker_name
+        if connection_conf is None:
+            connection_conf = {"host": "localhost", "port": 6379, "db": 0}
+        self.redis_client: redis.client.Redis = redis.StrictRedis(
+            **connection_conf, decode_responses=True
+        )
+        self.stream_name: str = stream_name
+
+    def emit(self, record):
+        """Emit log record to redis stream"""
+        # pylint: disable=broad-exception-caught
+        try:
+            # Create log entry as a dictionary with the required fields
+            log_entry = {
+                "worker_name": self.worker_name,
+                "timestamp": datetime.datetime.now(datetime.UTC).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                "log_level": record.levelname,
+                "log_message": record.getMessage(),
+            }
+
+            # Add the log entry to the Redis stream
+            self.redis_client.xadd(self.stream_name, log_entry)
+
+        except redis.exceptions.ConnectionError as conn_err:
+            print(f"ConnectionError while logging to Redis: {conn_err}")
+
+        except redis.exceptions.DataError as data_err:
+            print(f"DataError while logging to Redis: {data_err}")
+
+        except Exception as e:
+            # Log any other exception types not anticipated but avoid masking the error completely
+            print(f"Unexpected error while logging to Redis: {e}")
+
+
+class RedisLogFormatter(logging.Formatter):
+    """
+    Custom formatter to include worker name, timestamp (UTC), log level, and log message
+
+    def format(self, record):
+        return super().format(record)
+
+    """
+
+
+class RedisService(SimpleService):
+    """Service class with Redis data storage and pub/sub capabilities."""
+
+    # pylint: disable=too-many-instance-attributes
+    def __init__(
+        self,
+        service_name: str = "service",
         version: str = "0.0.1",
         delay: float = 5,
-        username: str = "worker",
         **kwargs,
     ) -> None:
+        self.__redis_conf = {
+            "host": kwargs.get("redis_host", "localhost"),
+            "port": kwargs.get("redis_port", 6379),
+            "db": kwargs.get("redis_db", 0),
+        }
         super().__init__(
             service_name=service_name, version=version, delay=delay, **kwargs
         )
-        self.__username: str = str(username)
-        self.redis_cli: redis.Redis = redis.Redis(
-            host=kwargs.get("redis_host", "localhost"),
-            port=kwargs.get("redis_port", 6379),
-        )
+        self.redis_cli: redis.Redis = redis.Redis(**self.__redis_conf)
         self.ts = self.redis_cli.ts()
         self.__ts_labels: list[str] = []
         self._get_ts_labels()
         self.pubsub = self.redis_cli.pubsub()
-        self.pubsub.subscribe(self.username)
+        self.pubsub.subscribe(self.service_name)
 
-        self.redis_cli.hset(self.service_name, "username", value=self.username)
         self.redis_cli.hset(self.service_name, "version", value=self.version)
         self.redis_cli.hset(self.service_name, "delay", value=str(self.delay))
         self.redis_cli.hset(
@@ -43,13 +101,21 @@ class RedisService(SimpleService):
         )
         self.redis_cli.hset(self.service_name, "running", value="0")
 
-    @property
-    def username(self) -> str:
-        """
-        Service username property is used as a dedicated channel name
-        for the Redis pub/sub communication.
-        """
-        return self.__username
+    def _logger_add_custom_handler(self) -> None:
+        """Override this method to add custom handler to logger"""
+        # Create Redis stream handler
+        redis_handler = RedisStreamHandler(
+            worker_name=self.service_name,
+            connection_conf=self.__redis_conf,
+            stream_name="worker_logs",
+        )
+
+        # Assign custom formatter to Redis handler
+        formatter = RedisLogFormatter()
+        redis_handler.setFormatter(formatter)
+
+        # Add the handler to the logger
+        self._logger.addHandler(redis_handler)
 
     @property
     def ts_labels(self) -> list[str]:
@@ -58,7 +124,7 @@ class RedisService(SimpleService):
 
     def _get_ts_labels(self) -> None:
         """populates list of time series labels, fixes aggregation rules"""
-        self.__ts_labels = self.ts.queryindex([f"name={self.username}", "type=src"])
+        self.__ts_labels = self.ts.queryindex([f"name={self.service_name}", "type=src"])
 
     def parse_message(self, msg: dict) -> tuple[str, list[str]]:
         """
@@ -84,7 +150,7 @@ class RedisService(SimpleService):
             msg = self.pubsub.get_message(ignore_subscribe_messages=True)
             if msg is None:
                 break
-            if msg["channel"].decode("utf-8") != self.username:
+            if msg["channel"].decode("utf-8") != self.service_name:
                 continue
             if msg["type"] != "message":
                 continue
@@ -144,7 +210,7 @@ class RedisService(SimpleService):
             self.ts.create(
                 label,
                 retention_msecs=retention_ms,
-                labels={"name": self.username, "type": "src"},
+                labels={"name": self.service_name, "type": "src"},
             )
         except redis.exceptions.ResponseError:
             pass
@@ -189,7 +255,7 @@ class RedisService(SimpleService):
                     self.ts.create(
                         f"{label}_{fun}_{aggregation}s",
                         retention_msecs=aggr_retention_ms,
-                        labels={"name": self.username, "type": fun},
+                        labels={"name": self.service_name, "type": fun},
                     )
                     # Create averaging rule
                     self.ts.createrule(
@@ -218,5 +284,5 @@ class RedisService(SimpleService):
             label,
             timestamp_ms,
             value,
-            labels={"name": self.username, "type": "src"},
+            labels={"name": self.service_name, "type": "src"},
         )

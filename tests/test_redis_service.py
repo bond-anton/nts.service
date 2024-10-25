@@ -31,30 +31,6 @@ class TestRedisService(unittest.TestCase):
             if self.count > self.max_count - 1:
                 self._exit = True
 
-    def test_user_name(self) -> None:
-        """Test user_name property"""
-        try:
-            worker = self.Worker(
-                service_name="TestRedisWorker",
-                version="1.0.1",
-                delay=0.1,
-                logging_level=LogLevel.DEBUG,
-                username="worker2",
-            )
-
-            # test service name is correctly set
-            self.assertEqual(worker.username, "worker2")
-            # test that service_name is not writable
-            with self.assertRaises(AttributeError):
-                # pylint: disable=attribute-defined-outside-init
-                worker.username = "New Name"
-            self.assertEqual(worker.username, "worker2")
-
-            redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
-            redis_cli.delete("TestRedisWorker")
-        except redis.exceptions.ResponseError:
-            pass
-
     def test_create_delete_time_series_channel(self):
         """Test time_series_channel creation"""
         try:
@@ -63,7 +39,6 @@ class TestRedisService(unittest.TestCase):
                 version="1.0.1",
                 delay=0.1,
                 logging_level=LogLevel.DEBUG,
-                username="worker2",
             )
             # test service name is correctly set
             ch_name = "test_ch_2345ghdkuuu"
@@ -95,22 +70,21 @@ class TestRedisService(unittest.TestCase):
                 version="1.0.1",
                 delay=1,
                 logging_level=LogLevel.DEBUG,
-                username="worker",
             )
 
             def publish_stop_signal():
                 redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
                 # You could do something more robust to wait until worker is loaded
                 time.sleep(0.1)
-                redis_cli.publish("worker", "my_command")
+                redis_cli.publish("TestRedisWorker", "my_command")
                 time.sleep(0.1)
-                redis_cli.publish("worker", " ")
+                redis_cli.publish("TestRedisWorker", " ")
                 time.sleep(1)
-                redis_cli.publish("worker", "delay::1.2")
+                redis_cli.publish("TestRedisWorker", "delay::1.2")
                 time.sleep(1)
-                redis_cli.publish("worker", "delay::aaa")
+                redis_cli.publish("TestRedisWorker", "delay::aaa")
                 time.sleep(1)
-                redis_cli.publish("worker", "exit")
+                redis_cli.publish("TestRedisWorker", "exit")
 
             thread1 = threading.Thread(target=publish_stop_signal)
             thread1.daemon = True

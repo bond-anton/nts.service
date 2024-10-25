@@ -39,7 +39,10 @@ class SimpleService:
                     self.__logging_level = logging.getLevelName(kwargs["logging_level"])
             except (TypeError, ValueError):
                 pass
-        self.__logger: logging.Logger = self._init_logger()
+        self._logger: logging.Logger = logging.getLogger(__name__)
+        self._logger.setLevel(self.logging_level)
+        self._logger_add_stdout_handler()
+        self._logger_add_custom_handler()
         self._exit: bool = False
 
         signal.signal(signal.SIGTERM, self._handle_sigterm)
@@ -49,14 +52,15 @@ class SimpleService:
 
         self.last_loop_timestamp_ms = time_ms()
 
-    def _init_logger(self):
-        logger = logging.getLogger(__name__)
-        logger.setLevel(self.logging_level)
+    def _logger_add_stdout_handler(self) -> None:
+        """Add stdout handler to logger"""
         stdout_handler = logging.StreamHandler()
         stdout_handler.setLevel(self.logging_level)
         stdout_handler.setFormatter(logging.Formatter("%(levelname)8s | %(message)s"))
-        logger.addHandler(stdout_handler)
-        return logger
+        self._logger.addHandler(stdout_handler)
+
+    def _logger_add_custom_handler(self) -> None:
+        """Override this method to add custom handler to logger"""
 
     @property
     def delay(self) -> float:
@@ -83,7 +87,7 @@ class SimpleService:
     @property
     def logger(self) -> logging.Logger:
         """Service logger."""
-        return self.__logger
+        return self._logger
 
     @property
     def logging_level(self) -> int:
@@ -96,7 +100,7 @@ class SimpleService:
             if not isinstance(logging.getLevelName(level), int):
                 self.__logging_level = logging.DEBUG
             else:
-                self.__logging_level = logging.getLevelName(level)
+                self.__logging_level = int(logging.getLevelName(level))
         except (TypeError, ValueError):
             pass
         self.logger.setLevel(self.__logging_level)
