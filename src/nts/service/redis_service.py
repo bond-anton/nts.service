@@ -3,12 +3,11 @@ Provides service class which use Redis server for data storage and pub/sub commu
 """
 
 from typing import Union
-import sys
 from datetime import datetime, timezone
 import logging
 import redis
 
-from .simple_service import SimpleService
+from .basic_service import BasicService
 from .__helpers import time_ms
 
 
@@ -66,10 +65,9 @@ class RedisLogFormatter(logging.Formatter):
     """
 
 
-class RedisService(SimpleService):
+class RedisService(BasicService):
     """Service class with Redis data storage and pub/sub capabilities."""
 
-    # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
         service_name: str = "service",
@@ -86,20 +84,30 @@ class RedisService(SimpleService):
             service_name=service_name, version=version, delay=delay, **kwargs
         )
         self.redis_cli: redis.client.Redis = redis.Redis(**self.__redis_conf)
+        self.pubsub = self.redis_cli.pubsub()
+        self.pubsub.subscribe(
+            f"{self.service_name}:{self.worker_id}", f"{self.service_name}:0"
+        )
         self.ts = self.redis_cli.ts()
         self.__ts_labels: list[str] = []
         self._get_ts_labels()
-        self.pubsub = self.redis_cli.pubsub()
-        self.pubsub.subscribe(self.service_name)
 
-        self.redis_cli.hset(self.service_name, "version", value=self.version)
-        self.redis_cli.hset(self.service_name, "delay", value=str(self.delay))
         self.redis_cli.hset(
-            self.service_name, "logging_level", value=str(self.logging_level)
+            f"{self.service_name}:{self.worker_id}", "version", value=self.version
         )
-        self.redis_cli.hset(self.service_name, "running", value="0")
+        self.redis_cli.hset(
+            f"{self.service_name}:{self.worker_id}", "delay", value=str(self.delay)
+        )
+        self.redis_cli.hset(
+            f"{self.service_name}:{self.worker_id}",
+            "logging_level",
+            value=str(self.logging_level),
+        )
+        self.redis_cli.hset(
+            f"{self.service_name}:{self.worker_id}", "running", value="0"
+        )
 
-    def _logger_add_custom_handler(self) -> None:
+    def _logger_add_custom_handlers(self) -> None:
         """Override this method to add custom handler to logger"""
         # Create Redis stream handler
         redis_handler = RedisStreamHandler(
@@ -107,12 +115,8 @@ class RedisService(SimpleService):
             connection_conf=self.__redis_conf,
             stream_name="worker_logs",
         )
-
-        # Assign custom formatter to Redis handler
         formatter = RedisLogFormatter()
         redis_handler.setFormatter(formatter)
-
-        # Add the handler to the logger
         self._logger.addHandler(redis_handler)
 
     @property
@@ -133,22 +137,42 @@ class RedisService(SimpleService):
         cmd: str = ""
         params: list[str] = []
         if msg["type"] == "message":
-            self.logger.debug("Got message: %s", msg)
+            self.logger.debug("%d: Got message: %s", self.worker_id, msg)
             params = msg["data"].decode("utf-8").strip().split("::")
             try:
                 cmd = params.pop(0)
             except IndexError:
                 params = []
-            self.logger.debug("CMD: %s", cmd)
-            self.logger.debug("PAR: %s", params)
+            self.logger.debug("%d: CMD: %s", self.worker_id, cmd)
+            self.logger.debug("%d: PAR: %s", self.worker_id, params)
         return cmd, params
 
-    def process_messages(self):
+    def parse_task_data(self, task_data: str) -> tuple[str, list[str]]:
+        """
+        Parses task data received from Redis to extract command and parameters list.
+        :param task_data: task data string for parsing.
+        :return: command string and a list of parameters.
+        """
+        task_name: str = ""
+        self.logger.debug("%d: Got task data: %s", self.worker_id, task_data)
+        params: list[str] = task_data.strip().split("::")
+        try:
+            task_name = params.pop(0)
+        except IndexError:
+            params = []
+        self.logger.debug("%d: TASK: %s", self.worker_id, task_name)
+        self.logger.debug("%d: PAR: %s", self.worker_id, params)
+        return task_name, params
+
+    def process_messages(self) -> None:
         while True:
             msg = self.pubsub.get_message(ignore_subscribe_messages=True)
             if msg is None:
                 break
-            if msg["channel"].decode("utf-8") != self.service_name:
+            if msg["channel"].decode("utf-8") not in [
+                f"{self.service_name}:{self.worker_id}",
+                f"{self.service_name}:0",
+            ]:
                 continue
             if msg["type"] != "message":
                 continue
@@ -158,11 +182,29 @@ class RedisService(SimpleService):
             elif cmd == "delay" and len(params) > 0:
                 try:
                     self.delay = float(params[0])
+                    self.redis_cli.hset(
+                        f"{self.service_name}:{self.worker_id}",
+                        "delay",
+                        value=str(self.delay),
+                    )
                 except (TypeError, ValueError, IndexError):
-                    self.logger.warning("Wrong argument for delay received")
+                    self.logger.warning(
+                        "%d: Wrong argument for delay received", self.worker_id
+                    )
             else:
                 if not self.execute_cmd(cmd, params):
-                    self.logger.warning("Command %s can not be executed", cmd)
+                    self.logger.warning(
+                        "%d: Command %s can not be executed", self.worker_id, cmd
+                    )
+
+    def process_tasks(self):
+        task = self.redis_cli.lpop(self.service_name + "_tasks")
+        if task:
+            task_name, params = self.parse_task_data(task.decode("utf-8"))
+            if not self.run_task(task_name, params):
+                self.logger.warning(
+                    "%d: Task %s can not be executed", self.worker_id, task_name
+                )
 
     def execute_cmd(self, cmd: str, params: list[str]):
         """
@@ -171,18 +213,25 @@ class RedisService(SimpleService):
         :param params: list of parameters for the command.
         :return: True if command execution was successful otherwise false.
         """
-        self.logger.debug("CMD: %s, PAR: %s", cmd, params)
+        self.logger.debug("%d: CMD: %s, PAR: %s", self.worker_id, cmd, params)
+        return False
+
+    def run_task(self, task_name: str, params: list[str]):
+        """
+        Execute command received.
+        :param task_name: Task to name to run.
+        :param params: list of parameters for the task.
+        :return: True if command execution was successful otherwise false.
+        """
+        self.logger.debug("%d: TASK: %s, PAR: %s", self.worker_id, task_name, params)
         return False
 
     def initialize(self):
         self.redis_cli.hset(self.service_name, "running", value="1")
 
-    def stop(self):
+    def cleanup(self):
         self.redis_cli.hset(self.service_name, "running", value="0")
-        self.logger.info("Cleaning up...")
-        self.cleanup()
         self.redis_cli.close()
-        sys.exit(0)
 
     def create_time_series_channel(
         self,

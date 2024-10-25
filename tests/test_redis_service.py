@@ -3,13 +3,14 @@
 import unittest
 import threading
 import time
+import logging
 import redis
 
 
 try:
-    from src.nts.service import RedisService, LogLevel
+    from src.nts.service import RedisService
 except ModuleNotFoundError:
-    from nts.service import RedisService, LogLevel
+    from nts.service import RedisService
 
 
 class TestRedisService(unittest.TestCase):
@@ -30,30 +31,31 @@ class TestRedisService(unittest.TestCase):
             self.count += 1
             if self.count > self.max_count - 1:
                 self._exit = True
+            self.logger.debug("ID: %d, COUNT: %d", self.worker_id, self.count)
 
     def test_create_delete_time_series_channel(self):
         """Test time_series_channel creation"""
         try:
-            worker = self.Worker(
+            worker1 = self.Worker(
                 service_name="TestRedisWorker",
                 version="1.0.1",
                 delay=0.1,
-                logging_level=LogLevel.DEBUG,
+                logging_level=logging.DEBUG,
             )
             # test service name is correctly set
             ch_name = "test_ch_2345ghdkuuu"
-            worker.del_time_series_channel(ch_name)
-            self.assertEqual(worker.ts_labels, [])
-            worker.create_time_series_channel(
+            worker1.del_time_series_channel(ch_name)
+            self.assertEqual(worker1.ts_labels, [])
+            worker1.create_time_series_channel(
                 ch_name, retention=2000, aggregation=(1, 60)
             )
-            self.assertEqual(worker.ts_labels, [ch_name])
-            self.assertEqual(len(worker.ts.info(ch_name).rules), 4)
-            worker.del_time_series_aggregation(ch_name, 60)
-            self.assertEqual(len(worker.ts.info(ch_name).rules), 2)
-            worker.put_ts_data(ch_name, 3.14)
-            worker.del_time_series_channel(ch_name)
-            self.assertEqual(worker.ts_labels, [])
+            self.assertEqual(worker1.ts_labels, [ch_name])
+            self.assertEqual(len(worker1.ts.info(ch_name).rules), 4)
+            worker1.del_time_series_aggregation(ch_name, 60)
+            self.assertEqual(len(worker1.ts.info(ch_name).rules), 2)
+            worker1.put_ts_data(ch_name, 3.14)
+            worker1.del_time_series_channel(ch_name)
+            self.assertEqual(worker1.ts_labels, [])
 
             redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
             redis_cli.delete("TestRedisWorker")
@@ -67,24 +69,31 @@ class TestRedisService(unittest.TestCase):
         try:
             worker1 = self.Worker(
                 service_name="TestRedisWorker",
+                worker_id=0,
                 version="1.0.1",
                 delay=1,
-                logging_level=LogLevel.DEBUG,
+                logging_level=logging.DEBUG,
             )
 
             def publish_stop_signal():
                 redis_cli: redis.Redis = redis.Redis(host="localhost", port=6379)
                 # You could do something more robust to wait until worker is loaded
                 time.sleep(0.1)
-                redis_cli.publish("TestRedisWorker", "my_command")
+                redis_cli.rpush("TestRedisWorker_tasks", "my_command")
+                redis_cli.publish("TestRedisWorker:0", "my_command")
                 time.sleep(0.1)
-                redis_cli.publish("TestRedisWorker", " ")
-                time.sleep(1)
-                redis_cli.publish("TestRedisWorker", "delay::1.2")
-                time.sleep(1)
-                redis_cli.publish("TestRedisWorker", "delay::aaa")
-                time.sleep(1)
-                redis_cli.publish("TestRedisWorker", "exit")
+                redis_cli.rpush("TestRedisWorker_tasks", " ")
+                redis_cli.publish("TestRedisWorker:0", " ")
+                time.sleep(0.1)
+                redis_cli.rpush("TestRedisWorker_tasks", "delay::1.2")
+                redis_cli.publish("TestRedisWorker:0", "delay::1.2")
+                time.sleep(0.1)
+                redis_cli.rpush("TestRedisWorker_tasks", "delay::aaa")
+                redis_cli.publish("TestRedisWorker:0", "delay::aaa")
+                time.sleep(0.1)
+                redis_cli.rpush("TestRedisWorker_tasks", "exit")
+                time.sleep(0.5)
+                redis_cli.publish("TestRedisWorker:0", "exit")
 
             thread1 = threading.Thread(target=publish_stop_signal)
             thread1.daemon = True

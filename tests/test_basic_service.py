@@ -9,9 +9,9 @@ import logging
 
 
 try:
-    from src.nts.service import SimpleService, LogLevel
+    from src.nts.service import BasicService
 except ModuleNotFoundError:
-    from nts.service import SimpleService, LogLevel
+    from nts.service import BasicService
 
 
 class TestSimpleService(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestSimpleService(unittest.TestCase):
     Test SimpleService class.
     """
 
-    class Worker(SimpleService):
+    class Worker(BasicService):
         """Example SimpleService worker implementation"""
 
         def __init__(self, *args, **kwargs):
@@ -39,7 +39,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
         # test service name is correctly set
         self.assertEqual(worker.service_name, "TestWorker")
@@ -55,7 +55,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
         # test version is correctly set
         self.assertEqual(worker.version, "1.0.1")
@@ -71,7 +71,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
         # test correct change of delay value is no problem.
         worker.delay = 0
@@ -100,35 +100,37 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
         # test logging level property
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
-        worker.logging_level = LogLevel.INFO
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.INFO))
-        worker.logging_level = LogLevel.WARN
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.WARN))
-        worker.logging_level = LogLevel.ERROR
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.ERROR))
-        worker.logging_level = LogLevel.DEBUG
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
+        worker.logging_level = logging.INFO
+        self.assertEqual(worker.logging_level, logging.INFO)
+        worker.logging_level = logging.WARN
+        self.assertEqual(worker.logging_level, logging.WARNING)
+        worker.logging_level = logging.ERROR
+        self.assertEqual(worker.logging_level, logging.ERROR)
+        worker.logging_level = logging.CRITICAL
+        self.assertEqual(worker.logging_level, logging.CRITICAL)
+        worker.logging_level = logging.DEBUG
+        self.assertEqual(worker.logging_level, logging.DEBUG)
         worker.logging_level = "test level"
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
         worker.logging_level = None
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
         worker.logging_level = [1, 2]
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
         worker = self.Worker(
             service_name="TestWorker", version="1.0.1", delay=0.1, logging_level=[1, 2]
         )
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
         worker = self.Worker(
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
             logging_level="test level",
         )
-        self.assertEqual(worker.logging_level, logging.getLevelName(LogLevel.DEBUG))
+        self.assertEqual(worker.logging_level, logging.DEBUG)
 
     def test_simple_service(self) -> None:
         """
@@ -138,7 +140,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=0.1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
         with self.assertRaises(SystemExit) as cm:
             worker.start()
@@ -151,7 +153,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
 
         pid = os.getpid()
@@ -175,7 +177,7 @@ class TestSimpleService(unittest.TestCase):
             service_name="TestWorker",
             version="1.0.1",
             delay=1,
-            logging_level=LogLevel.DEBUG,
+            logging_level=logging.DEBUG,
         )
 
         pid = os.getpid()
