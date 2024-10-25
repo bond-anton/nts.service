@@ -4,7 +4,7 @@ Provides service class which use Redis server for data storage and pub/sub commu
 
 from typing import Union
 import sys
-import datetime
+from datetime import datetime, timezone
 import logging
 import redis
 
@@ -37,9 +37,7 @@ class RedisStreamHandler(logging.Handler):
             # Create log entry as a dictionary with the required fields
             log_entry = {
                 "worker_name": self.worker_name,
-                "timestamp": datetime.datetime.now(datetime.UTC).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 "log_level": record.levelname,
                 "log_message": record.getMessage(),
             }
@@ -87,7 +85,7 @@ class RedisService(SimpleService):
         super().__init__(
             service_name=service_name, version=version, delay=delay, **kwargs
         )
-        self.redis_cli: redis.Redis = redis.Redis(**self.__redis_conf)
+        self.redis_cli: redis.client.Redis = redis.Redis(**self.__redis_conf)
         self.ts = self.redis_cli.ts()
         self.__ts_labels: list[str] = []
         self._get_ts_labels()
